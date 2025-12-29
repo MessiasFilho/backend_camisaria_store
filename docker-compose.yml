@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4041:4041"
+    environment:
+      - DB=root:password@tcp(db:3306)/loja_camisaria?charset=utf8mb4&parseTime=True&loc=Local
+      - JWT_SECRET=your_jwt_secret_key_change_this_in_production
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - camisaria-network
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: loja_camisaria
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - camisaria-network
+    command: --default-authentication-plugin=mysql_native_password
+
+volumes:
+  mysql_data:
+
+networks:
+  camisaria-network:
+    driver: bridge
