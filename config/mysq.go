@@ -3,6 +3,7 @@ package config
 import (
 	"backend_camisaria_store/schemas"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -12,20 +13,15 @@ import (
 
 func InitializeMysql() (*gorm.DB, error) {
 
-	_ = godotenv.Load()
-
-	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
-	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASSWORD")
-	name := os.Getenv("DB_NAME")
-
-	if host == "" {
-		host = "localhost"
-		port = "3306"
-		user = "root"
-		name = "loja_camisaria"
+	if os.Getenv("ENV") != "production" {
+		_ = godotenv.Load()
 	}
+
+	host := mustGetEnv("DB_HOST")
+	port := mustGetEnv("DB_PORT")
+	user := mustGetEnv("DB_USER")
+	pass := mustGetEnv("DB_PASSWORD")
+	name := mustGetEnv("DB_NAME")
 
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
@@ -36,18 +32,26 @@ func InitializeMysql() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = db.AutoMigrate(
-		&schemas.Users{},
-		&schemas.Clients{},
-		&schemas.Orders{},
-		&schemas.Products{},
-		&schemas.ProductImage{},
-	)
 
-	if err != nil {
-		fmt.Printf("Mysql automigration error %v", err)
+	if os.Getenv("AUTO_MIGRATE") == "true" {
+		if err := db.AutoMigrate(
+			&schemas.Users{},
+			&schemas.Clients{},
+			&schemas.Orders{},
+			&schemas.Products{},
+			&schemas.ProductImage{},
+		); err != nil {
+			return nil, err
+		}
 	}
 
-	return db, err
+	return db, nil
+}
 
+func mustGetEnv(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		log.Fatalf("Variável de ambiente obrigatória não definida: %s", key)
+	}
+	return value
 }
