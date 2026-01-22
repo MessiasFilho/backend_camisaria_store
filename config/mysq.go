@@ -13,19 +13,32 @@ import (
 
 func InitializeMysql() (*gorm.DB, error) {
 
+	// Carrega .env apenas fora de produção
 	if os.Getenv("ENV") != "production" {
 		_ = godotenv.Load()
 	}
 
+	env := getEnv("ENV", "development")
+
 	host := mustGetEnv("DB_HOST")
 	port := mustGetEnv("DB_PORT")
 	user := mustGetEnv("DB_USER")
-	pass := mustGetEnv("DB_PASSWORD")
 	name := mustGetEnv("DB_NAME")
+
+	// 🔐 Regra especial para senha
+	pass := os.Getenv("DB_PASSWORD")
+
+	if pass == "" && env != "development" {
+		log.Fatal("Variável de ambiente obrigatória não definida: DB_PASSWORD")
+	}
 
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		user, pass, host, port, name,
+		user,
+		pass, // pode ser vazio apenas em DEV
+		host,
+		port,
+		name,
 	)
 
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
@@ -33,25 +46,37 @@ func InitializeMysql() (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if os.Getenv("AUTO_MIGRATE") == "true" {
-		if err := db.AutoMigrate(
-			&schemas.Users{},
-			&schemas.Clients{},
-			&schemas.Orders{},
-			&schemas.Products{},
-			&schemas.ProductImage{},
-		); err != nil {
-			return nil, err
-		}
+	// Auto migrate controlado por env
+
+	if err := db.AutoMigrate(
+		&schemas.Users{},
+		&schemas.Clients{},
+		&schemas.Orders{},
+		&schemas.Products{},
+		&schemas.ProductImage{},
+	); err != nil {
+		return nil, err
 	}
 
 	return db, nil
 }
 
+// ========================
+// Helpers
+// ========================
+
 func mustGetEnv(key string) string {
 	value := os.Getenv(key)
 	if value == "" {
 		log.Fatalf("Variável de ambiente obrigatória não definida: %s", key)
+	}
+	return value
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
 	}
 	return value
 }
