@@ -6,6 +6,7 @@ type Clients struct {
 	ID        uint64 `gorm:"primaryKey;autoIncrement"`
 	Name      string
 	Status    string    `gorm:"type:enum('active','inactive');default:'active'"`
+	Role      UserRole  `json:"role" gorm:"type:enum('admin','user','client');default:'client'"`
 	Telefone  string    `gorm:"type:varchar(20)"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTIme"`

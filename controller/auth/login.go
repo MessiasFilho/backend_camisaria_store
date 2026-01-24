@@ -44,22 +44,20 @@ func LoginUser(c *fiber.Ctx) error {
 		})
 	}
 
-	line := 2
-
-	if user.Role == "admin" {
-		line = 1
-	}
+	// Role-based claims - admin, user, or client
 
 	claims := jwt.MapClaims{
-		"code": user.ID,
-		"name": user.Name,
-		"line": line,
-		"exp":  time.Now().Add(time.Hour * 72).Unix(),
+		"user_id":   user.ID,
+		"user_type": string(user.Role), // "admin", "user", or "client"
+		"name":      user.Name,
+		"email":     user.Email,
+		"role":      string(user.Role),
+		"exp":       time.Now().Add(time.Hour * 72).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	t, err := token.SignedString([]byte("secret"))
+	t, err := token.SignedString(common.GetJWTSecret())
 	if err != nil {
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}

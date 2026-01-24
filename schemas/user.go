@@ -5,8 +5,9 @@ import "time"
 type UserRole string
 
 const (
-	RoleAdmin UserRole = "admin"
-	RoleUser  UserRole = "user"
+	RoleAdmin  UserRole = "admin"
+	RoleUser   UserRole = "user"
+	RoleClient UserRole = "client"
 )
 
 type Users struct {
@@ -14,7 +15,7 @@ type Users struct {
 	Name      string    `json:"name"`
 	Email     string    `json:"email" gorm:"unique"`
 	Password  string    `json:"password"`
-	Role      UserRole  `json:"role" gorm:"type:enum('admin','user');default:'admin'"`
+	Role      UserRole  `json:"role" gorm:"type:enum('admin','user','client');default:'client'"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
