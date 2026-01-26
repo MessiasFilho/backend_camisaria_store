@@ -12,10 +12,18 @@ var (
 
 func Init() error {
 	var err error
-	DB, err = InitializeMysql()
 
+	// Inicializar MySQL
+	DB, err = InitializeMysql()
 	if err != nil {
 		return fmt.Errorf("error initialize mysql %v", err)
 	}
+
+	// Inicializar MinIO
+	err = InitMinio()
+	if err != nil {
+		return fmt.Errorf("error initialize minio %v", err)
+	}
+
 	return nil
 }

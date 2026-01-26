@@ -4,8 +4,10 @@ import (
 	"backend_camisaria_store/common"
 	"backend_camisaria_store/config"
 	"context"
+	"fmt"
 	"mime"
 	"mime/multipart"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -109,4 +111,34 @@ func ValidateImageFile(file *multipart.FileHeader) error {
 	}
 
 	return nil
+}
+
+func ObjectKeyFormUrl(u string) (string, error) {
+	if u == "" {
+		return "", fmt.Errorf("campo vazio")
+	}
+
+	parsed, err := url.ParseRequestURI(u)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimLeft(u, "/"), nil
+	}
+
+	path := strings.TrimLeft(parsed.Path, "/")
+
+	if b := strings.TrimSpace(config.BunkedName); b != "" {
+		path = strings.TrimPrefix(path, b+"/")
+	}
+
+	key, dacerr := url.PathUnescape(path)
+
+	if dacerr != nil {
+		key = path
+	}
+
+	if key == "nil" {
+		return "", fmt.Errorf("não foi possivel extrair a key do objeto")
+	}
+
+	return key, nil
+
 }

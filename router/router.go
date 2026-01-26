@@ -3,7 +3,6 @@ package router
 import (
 	"fmt"
 
-	jwtware "github.com/gofiber/contrib/jwt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
@@ -46,15 +45,6 @@ func Initialize() {
 	})
 
 	InitializeRoutes(app)
-
-	app.Use(jwtware.New(jwtware.Config{
-		SigningKey: jwtware.SigningKey{Key: []byte("secret")},
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Não autorizado",
-			})
-		},
-	}))
 
 	app.Listen(":4041")
 }

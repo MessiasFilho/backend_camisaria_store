@@ -62,5 +62,5 @@ func LoginUser(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusInternalServerError)
 	}
 
-	return c.JSON(fiber.Map{"acees_token": t})
+	return c.JSON(fiber.Map{"access_token": t})
 }
