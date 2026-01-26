@@ -28,7 +28,7 @@ type Products struct {
 	MinStock         int            `gorm:"default:0"`
 	Weight           float64        `gorm:"type:decimal(5,2)"` // em kg
 	Dimensions       string         // comprimento x largura x altura
-	Images           []ProductImage `gorm:"foreignKey:ProductID"`
+	Images           []string `gorm:"type:json"`
 	IsActive         bool           `gorm:"default:true"`
 	IsPromotional    bool           `gorm:"default:false"`
 	Tags             string         // tags separadas por vírgula

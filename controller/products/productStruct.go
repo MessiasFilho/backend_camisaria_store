@@ -73,6 +73,7 @@ type ProductResponse struct {
 	MinStock         int              `json:"min_stock"`
 	Weight           float64          `json:"weight"`
 	Dimensions       string           `json:"dimensions"`
+	Images           []string         `json:"images"` // URLs das imagens
 	IsActive         bool             `json:"is_active"`
 	IsPromotional    bool             `json:"is_promotional"`
 	Tags             string           `json:"tags"`

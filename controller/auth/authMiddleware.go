@@ -95,28 +95,35 @@ func AuthMiddleware(c *fiber.Ctx) error {
 	return c.Next()
 }
 
-// RequireRole é um middleware auxiliar para verificar roles específicos
-func RequireRole(requiredRole string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		userRole := c.Locals("userRole")
-		if userRole == nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Usuário não autenticado",
-			})
-		}
+func AdminMiddlware(c *fiber.Ctx) error {
+	userType := c.Locals("user_type").(string)
 
-		role, ok := userRole.(string)
-		if !ok || role != requiredRole {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error": "Acesso negado. Role necessário: " + requiredRole,
-			})
-		}
-
-		return c.Next()
+	if userType != "admin" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"Error": "Acesso negado",
+		})
 	}
+	return c.Next()
 }
 
-// RequireAdmin é um atalho para RequireRole("admin")
-func RequireAdmin(c *fiber.Ctx) error {
-	return RequireRole("admin")(c)
+func UserMiddleware(c *fiber.Ctx) error {
+	userType := c.Locals("user_type").(string)
+
+	if userType != "user" && userType != "admin" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"Error": "Acesso negado - apenas usuários podem acessar",
+		})
+	}
+	return c.Next()
+}
+
+func ClientMiddleware(c *fiber.Ctx) error {
+	userType := c.Locals("user_type").(string)
+
+	if userType != "client" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"Error": "Acesso negado - apenas clientes podem acessar",
+		})
+	}
+	return c.Next()
 }

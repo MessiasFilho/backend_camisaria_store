@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/minio/minio-go/v7"
 )
 
@@ -63,4 +64,49 @@ func UploadProductImage(file *multipart.FileHeader, productName, dir string, pro
 
 	publicURL := common.PublicObjectURL(objectName)
 	return publicURL, objectName, nil
+}
+
+func ValidateImageFile(file *multipart.FileHeader) error {
+	// Tipos MIME permitidos
+	allowedTypes := map[string]bool{
+		"image/jpeg": true,
+		"image/jpg":  true,
+		"image/png":  true,
+		"image/webp": true,
+		"image/gif":  true,
+	}
+
+	// Verificar tipo MIME
+	contentType := file.Header.Get("Content-Type")
+	if !allowedTypes[contentType] {
+		return fiber.NewError(fiber.StatusBadRequest, "Tipo de arquivo não permitido. Use apenas JPEG, PNG, WebP ou GIF")
+	}
+
+	// Verificar extensão do arquivo
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	allowedExts := map[string]bool{
+		".jpg":  true,
+		".jpeg": true,
+		".png":  true,
+		".webp": true,
+		".gif":  true,
+	}
+
+	if !allowedExts[ext] {
+		return fiber.NewError(fiber.StatusBadRequest, "Extensão de arquivo não permitida")
+	}
+
+	// Verificar tamanho máximo (5MB)
+	const maxSize = 5 * 1024 * 1024 // 5MB
+	if file.Size > maxSize {
+		return fiber.NewError(fiber.StatusBadRequest, "Arquivo muito grande. Tamanho máximo: 5MB")
+	}
+
+	// Verificar tamanho mínimo (1KB)
+	const minSize = 1024 // 1KB
+	if file.Size < minSize {
+		return fiber.NewError(fiber.StatusBadRequest, "Arquivo muito pequeno. Tamanho mínimo: 1KB")
+	}
+
+	return nil
 }

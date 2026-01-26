@@ -3,9 +3,11 @@ package controller
 import (
 	"backend_camisaria_store/config"
 	"backend_camisaria_store/schemas"
+	"backend_camisaria_store/service/minio"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 func CreateProduct(c *fiber.Ctx) error {
@@ -98,6 +100,7 @@ func GetProduct(c *fiber.Ctx) error {
 			MinStock:         product.MinStock,
 			Weight:           product.Weight,
 			Dimensions:       product.Dimensions,
+			Images:           product.Images,
 			IsActive:         product.IsActive,
 			IsPromotional:    product.IsPromotional,
 			Tags:             product.Tags,
@@ -239,6 +242,7 @@ func UpdateProduct(c *fiber.Ctx) error {
 			MinStock:         product.MinStock,
 			Weight:           product.Weight,
 			Dimensions:       product.Dimensions,
+			Images:           product.Images,
 			IsActive:         product.IsActive,
 			IsPromotional:    product.IsPromotional,
 			Tags:             product.Tags,
@@ -378,6 +382,7 @@ func ListProducts(c *fiber.Ctx) error {
 			MinStock:         product.MinStock,
 			Weight:           product.Weight,
 			Dimensions:       product.Dimensions,
+			Images:           product.Images,
 			IsActive:         product.IsActive,
 			IsPromotional:    product.IsPromotional,
 			Tags:             product.Tags,
@@ -397,3 +402,172 @@ func ListProducts(c *fiber.Ctx) error {
 		Pages:    totalPages,
 	})
 }
+
+func uploadImgesProduct(c *fiber.Ctx) error {
+
+	// 1. Validar se o ID foi fornecido
+	idParam := c.Params("id")
+	if idParam == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "ID do produto é obrigatório",
+			"message": "O parâmetro 'id' não foi fornecido na URL",
+		})
+	}
+
+	// 2. Validar se o ID é um número válido e positivo
+	productID, err := strconv.ParseUint(idParam, 10, 32)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":    "ID do produto inválido",
+			"message":  "O ID deve ser um número inteiro positivo",
+			"received": idParam,
+		})
+	}
+
+	if productID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "ID do produto inválido",
+			"message": "O ID do produto deve ser maior que zero",
+		})
+	}
+
+	produto := schemas.Products{}
+	result := config.DB.Where("id = ?", productID).First(&produto)
+
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error":      "Produto não encontrado",
+				"message":    "Não existe produto com o ID informado",
+				"product_id": productID,
+			})
+		}
+		// Erro de banco de dados
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "Erro interno do servidor",
+			"message": "Erro ao consultar produto no banco de dados",
+		})
+	}
+
+	if !produto.IsActive {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":      "Produto inativo",
+			"message":    "Não é possível fazer upload de imagens para produtos inativos",
+			"product_id": productID,
+		})
+	}
+
+	// ====================
+	// Processar Upload de Arquivos
+	// ====================
+
+	// Obter arquivos multipart do formulário
+	form, err := c.MultipartForm()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Erro no formulário",
+			"message": "Erro ao processar dados do formulário multipart",
+		})
+	}
+
+	files := form.File["images"] // Campo esperado: "images"
+	if len(files) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Nenhum arquivo enviado",
+			"message": "Envie pelo menos uma imagem no campo 'images'",
+		})
+	}
+
+	// Limite de arquivos por upload
+	const maxFiles = 5
+	if len(files) > maxFiles {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Muitos arquivos",
+			"message": "Máximo de " + strconv.Itoa(maxFiles) + " imagens por upload",
+		})
+	}
+
+	// ====================
+	// Processar cada imagem
+	// ====================
+
+	var uploadedImages []fiber.Map
+	var newImageURLs []string
+	var errors []fiber.Map
+
+	// Começar com as imagens já existentes no produto
+	if produto.Images != nil {
+		newImageURLs = append(newImageURLs, produto.Images...)
+	}
+
+	for _, fileHeader := range files {
+		// Validar arquivo
+		if err := minio.ValidateImageFile(fileHeader); err != nil {
+			errors = append(errors, fiber.Map{
+				"file":  fileHeader.Filename,
+				"error": err.Error(),
+			})
+			continue
+		}
+
+		// Fazer upload para MinIO
+		publicURL, objectName, err := minio.UploadProductImage(fileHeader, produto.Name, "products", productID)
+		if err != nil {
+			errors = append(errors, fiber.Map{
+				"file":  fileHeader.Filename,
+				"error": "Falha no upload: " + err.Error(),
+			})
+			continue
+		}
+
+		// Adicionar URL à lista de imagens do produto
+		newImageURLs = append(newImageURLs, publicURL)
+
+		// Adicionar à lista de sucesso
+		uploadedImages = append(uploadedImages, fiber.Map{
+			"url":        publicURL,
+			"filename":   fileHeader.Filename,
+			"size":       fileHeader.Size,
+			"order":      len(newImageURLs) - 1, // Ordem baseada na posição na lista
+			"object_key": objectName,
+		})
+	}
+
+	// ====================
+	// Atualizar produto com novas imagens
+	// ====================
+
+	if len(uploadedImages) > 0 {
+		updateData := fiber.Map{
+			"images": newImageURLs,
+		}
+
+		if err := config.DB.Model(&produto).Updates(updateData).Error; err != nil {
+			// Se falhar ao atualizar, adicionar erro
+			errors = append(errors, fiber.Map{
+				"error": "Erro ao atualizar produto com novas imagens: " + err.Error(),
+			})
+		}
+	}
+
+	// ====================
+	// Retornar resposta
+	// ====================
+
+	message := "Upload processado"
+	response := fiber.Map{
+		"message": message,
+	}
+
+	if len(errors) > 0 {
+		response["errors"] = errors
+		message += " com alguns erros"
+		response["message"] = message
+		return c.Status(fiber.StatusPartialContent).JSON(response)
+	}
+
+	response["message"] = "Todas as imagens foram enviadas com sucesso"
+	return c.Status(fiber.StatusCreated).JSON(response)
+}
+
+// validateImageFile valida se o arquivo é uma imagem válida
