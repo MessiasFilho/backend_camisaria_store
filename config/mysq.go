@@ -53,6 +53,8 @@ func InitializeMysql() (*gorm.DB, error) {
 		&schemas.Clients{},
 		&schemas.Orders{},
 		&schemas.Products{},
+		&schemas.OrderItems{},
+		&schemas.Address{},
 	); err != nil {
 		return nil, err
 	}
