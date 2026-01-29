@@ -212,7 +212,7 @@ func ClientMiddleware(c *fiber.Ctx) error {
 			"message": "Erro ao processar dados de autenticação",
 		})
 	}
-
+	
 	// Verificar se é cliente
 	if userType != "client" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
