@@ -15,6 +15,14 @@ func InitializeRoutes(app *fiber.App) {
 	// para evitar conflito de middlewares
 
 	// Rotas públicas - não precisam de autenticação
+
+	public := app.Group("/api")
+	public.Get("/", func(c *fiber.Ctx) error {
+		return c.Status(fiber.StatusOK).JSON(fiber.Map{
+			"message": "API is running",
+		})
+	})
+
 	auth := app.Group("/api/auth")
 	auth.Post("/login", authcontroller.LoginUser)
 	auth.Post("/register", userController.CreateUser)

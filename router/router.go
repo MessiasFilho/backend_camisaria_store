@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -44,6 +45,7 @@ func Initialize() {
 		return c.Next()
 	})
 
+	log.Println("Routes initialized")
 	InitializeRoutes(app)
 
 	app.Listen(":4041")
