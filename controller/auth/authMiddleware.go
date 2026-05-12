@@ -183,11 +183,11 @@ func UserMiddleware(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verificar permissões
-	if userType != "user" && userType != "admin" {
+	// Qualquer usuário autenticado (admin, user interno ou cliente da loja)
+	if userType != "user" && userType != "admin" && userType != "client" {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"error":   "Acesso negado",
-			"message": "Apenas usuários e administradores podem acessar este recurso",
+			"message": "Tipo de conta sem permissão para este recurso",
 		})
 	}
 
