@@ -4,6 +4,7 @@ import (
 	"backend_camisaria_store/config"
 	"backend_camisaria_store/schemas"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/crypto/bcrypt"
@@ -36,11 +37,13 @@ func CreateUser(c *fiber.Ctx) error {
 		})
 	}
 
-	// Mapear request para schema
+	// Cadastro público: sempre cliente da loja (não aceita role no body).
 	user := schemas.Users{
-		Name:     req.Name,
-		Email:    req.Email,
+		Name:     strings.TrimSpace(req.Name),
+		Email:    strings.TrimSpace(req.Email),
+		Contact:  strings.TrimSpace(req.Contact),
 		Password: string(hashedPassword),
+		Role:     schemas.RoleClient,
 	}
 
 	// Salvar no banco
@@ -54,6 +57,60 @@ func CreateUser(c *fiber.Ctx) error {
 	// Retornar resposta de sucesso
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"message": "user created",
+	})
+}
+
+// CreateStaffUser cria conta admin ou user interno (ex.: Postman com JWT de admin).
+func CreateStaffUser(c *fiber.Ctx) error {
+	req := CreateStaffUserRequest{}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Erro ao processar dados da requisição",
+			"details": err.Error(),
+		})
+	}
+
+	if err := req.Validate(); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Dados inválidos",
+			"details": err.Error(),
+		})
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "Erro ao processar senha",
+			"details": "Falha ao criar hash da senha",
+		})
+	}
+
+	role := schemas.UserRole(req.Role)
+	user := schemas.Users{
+		Name:     strings.TrimSpace(req.Name),
+		Email:    strings.TrimSpace(req.Email),
+		Password: string(hashedPassword),
+		Role:     role,
+	}
+
+	if err := config.DB.Create(&user).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "Erro ao salvar usuário",
+			"details": err.Error(),
+		})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"message": "user created",
+		"user": UserResponse{
+			ID:        user.ID,
+			Name:      user.Name,
+			Email:     user.Email,
+			Contact:   user.Contact,
+			CreatedAt: user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			UpdatedAt: user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		},
 	})
 }
 
@@ -103,6 +160,7 @@ func GetUsers(c *fiber.Ctx) error {
 			ID:        user.ID,
 			Name:      user.Name,
 			Email:     user.Email,
+			Contact:   user.Contact,
 			CreatedAt: user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
@@ -139,6 +197,7 @@ func GetUser(c *fiber.Ctx) error {
 		ID:        user.ID,
 		Name:      user.Name,
 		Email:     user.Email,
+		Contact:   user.Contact,
 		CreatedAt: user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
@@ -223,6 +282,7 @@ func UpdateUser(c *fiber.Ctx) error {
 			ID:        user.ID,
 			Name:      user.Name,
 			Email:     user.Email,
+			Contact:   user.Contact,
 			CreatedAt: user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			UpdatedAt: user.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		},

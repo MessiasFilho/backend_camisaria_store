@@ -6,11 +6,20 @@ import (
 	"strings"
 )
 
-// CreateUserRequest representa a requisição para criar um usuário
+// CreateUserRequest representa o cadastro público na loja (sempre perfil cliente).
 type CreateUserRequest struct {
 	Name     string `json:"name" validate:"required,min=3,max=255"`
 	Email    string `json:"email" validate:"required,email"`
+	Contact  string `json:"contact" validate:"required,min=8,max=32"`
 	Password string `json:"password" validate:"required,min=6"`
+}
+
+// CreateStaffUserRequest cria usuário interno (admin ou user) — rota protegida para uso via Postman/painel.
+type CreateStaffUserRequest struct {
+	Name     string `json:"name" validate:"required,min=3,max=255"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
+	Role     string `json:"role" validate:"required,oneof=admin user"`
 }
 
 // UpdateUserRequest representa a requisição para atualizar um usuário
@@ -25,6 +34,7 @@ type UserResponse struct {
 	ID        uint64 `json:"id"`
 	Name      string `json:"name"`
 	Email     string `json:"email"`
+	Contact   string `json:"contact,omitempty"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -66,7 +76,50 @@ func (req *CreateUserRequest) Validate() error {
 		errs = append(errs, "senha deve ter pelo menos 6 caracteres")
 	}
 
+	// Contato (telefone / WhatsApp)
+	c := strings.TrimSpace(req.Contact)
+	if c == "" {
+		errs = append(errs, "contato é obrigatório")
+	} else if len(c) < 8 || len(c) > 32 {
+		errs = append(errs, "contato deve ter entre 8 e 32 caracteres")
+	}
+
 	// Se houver erros, retorna um erro composto
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+
+	return nil
+}
+
+func (req *CreateStaffUserRequest) Validate() error {
+	var errs []string
+
+	if strings.TrimSpace(req.Name) == "" {
+		errs = append(errs, "nome é obrigatório")
+	} else if len(req.Name) < 3 || len(req.Name) > 255 {
+		errs = append(errs, "nome deve ter entre 3 e 255 caracteres")
+	}
+
+	if strings.TrimSpace(req.Email) == "" {
+		errs = append(errs, "e-mail é obrigatório")
+	} else {
+		emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+		if !emailRegex.MatchString(req.Email) {
+			errs = append(errs, "e-mail deve ter um formato válido")
+		}
+	}
+
+	if strings.TrimSpace(req.Password) == "" {
+		errs = append(errs, "senha é obrigatória")
+	} else if len(req.Password) < 6 {
+		errs = append(errs, "senha deve ter pelo menos 6 caracteres")
+	}
+
+	if req.Role != "admin" && req.Role != "user" {
+		errs = append(errs, "role deve ser 'admin' ou 'user'")
+	}
+
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}

@@ -3,15 +3,136 @@ package controller
 import (
 	"backend_camisaria_store/config"
 	"backend_camisaria_store/schemas"
-	"backend_camisaria_store/service/minio"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
+
+func parsePagination(c *fiber.Ctx) (page, limit, offset int) {
+	page, err := strconv.Atoi(c.Query("page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err = strconv.Atoi(c.Query("limit", "12"))
+	if err != nil || limit < 1 {
+		limit = 12
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset = (page - 1) * limit
+	return page, limit, offset
+}
+
+func applyProductFilters(query *gorm.DB, filters ProductFilter) *gorm.DB {
+	if filters.Category != nil {
+		query = query.Where("categorys = ?", *filters.Category)
+	}
+	if filters.Status != nil {
+		query = query.Where("status = ?", *filters.Status)
+	}
+	if filters.Active != nil {
+		query = query.Where("is_active = ?", *filters.Active)
+	}
+	if filters.Search != nil && strings.TrimSpace(*filters.Search) != "" {
+		term := "%" + strings.TrimSpace(*filters.Search) + "%"
+		query = query.Where("name LIKE ? OR description LIKE ? OR sku LIKE ?", term, term, term)
+	}
+	return query
+}
+
+func listProductsWithFilters(c *fiber.Ctx, filters ProductFilter) error {
+	page, limit, offset := parsePagination(c)
+
+	query := config.DB.Model(&schemas.Products{})
+	query = applyProductFilters(query, filters)
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Erro ao contar produtos",
+		})
+	}
+
+	var products []schemas.Products
+	if err := query.Order("created_at DESC").Offset(offset).Limit(limit).Find(&products).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Erro ao buscar produtos",
+		})
+	}
+
+	responses := make([]ProductResponse, 0, len(products))
+	for _, p := range products {
+		responses = append(responses, toProductResponse(p))
+	}
+
+	totalPages := int((total + int64(limit) - 1) / int64(limit))
+	if totalPages < 1 {
+		totalPages = 1
+	}
+
+	return c.Status(fiber.StatusOK).JSON(ProductListResponse{
+		Products: responses,
+		Total:    total,
+		Page:     page,
+		Limit:    limit,
+		Pages:    totalPages,
+	})
+}
+
+// ListProducts — admin: lista paginada com filtros (category, status, search, active).
+func ListProducts(c *fiber.Ctx) error {
+	filters := ProductFilter{}
+
+	if category := c.Query("category"); category != "" {
+		cat := schemas.Category(category)
+		filters.Category = &cat
+	}
+	if status := c.Query("status"); status != "" {
+		st := schemas.ProductStatus(status)
+		filters.Status = &st
+	}
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
+	}
+	if activeStr := c.Query("active"); activeStr != "" {
+		active := activeStr == "true" || activeStr == "1"
+		filters.Active = &active
+	} else {
+		// Admin vê apenas registros ativos por padrão (soft delete mantém is_active=false)
+		active := true
+		filters.Active = &active
+	}
+
+	return listProductsWithFilters(c, filters)
+}
+
+// ListPublishedProducts — loja pública: apenas publicados e ativos.
+func ListPublishedProducts(c *fiber.Ctx) error {
+	published := schemas.ProductStatusPublished
+	active := true
+	filters := ProductFilter{
+		Status: &published,
+		Active: &active,
+	}
+
+	if category := c.Query("category"); category != "" {
+		cat := schemas.Category(category)
+		if isValidCategory(cat) {
+			filters.Category = &cat
+		}
+	}
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
+	}
+
+	return listProductsWithFilters(c, filters)
+}
 
 func CreateProduct(c *fiber.Ctx) error {
 	req := CreateProductRequest{}
-
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "Erro ao processar dados da requisição",
@@ -19,7 +140,6 @@ func CreateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validar dados
 	if err := req.Validate(); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "Dados inválidos",
@@ -27,10 +147,16 @@ func CreateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Mapear request para schema
+	status := req.Status
+	if status == "" {
+		status = schemas.ProductStatusDraft
+	}
+
+	isPromotional := req.PromotionalPrice != nil && *req.PromotionalPrice > 0
+
 	product := schemas.Products{
-		SKU:              req.SKU,
-		Name:             req.Name,
+		SKU:              strings.TrimSpace(req.SKU),
+		Name:             strings.TrimSpace(req.Name),
 		Description:      req.Description,
 		Categorys:        req.Categorys,
 		Size:             req.Size,
@@ -46,11 +172,11 @@ func CreateProduct(c *fiber.Ctx) error {
 		Tags:             req.Tags,
 		SEODescription:   req.SEODescription,
 		SEOKeywords:      req.SEOKeywords,
-		IsActive:         true, // Produtos novos são ativos por padrão
-		IsPromotional:    false,
+		Status:           status,
+		IsActive:         true,
+		IsPromotional:    isPromotional,
 	}
 
-	// Salvar no banco
 	if err := config.DB.Create(&product).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Erro ao salvar produto",
@@ -58,66 +184,32 @@ func CreateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Retornar resposta de sucesso
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"message": "Produto criado com sucesso",
+		"product": toProductResponse(product),
 	})
 }
 
 func GetProduct(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	// Converter string para uint
-	productID, err := strconv.ParseUint(id, 10, 64)
+	productID, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "ID inválido",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
 
 	var product schemas.Products
 	if err := config.DB.First(&product, productID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Produto não encontrado",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Produto não encontrado"})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"product": ProductResponse{
-			ID:               product.ID,
-			SKU:              product.SKU,
-			Name:             product.Name,
-			Description:      product.Description,
-			Categorys:        product.Categorys,
-			Size:             product.Size,
-			Color:            product.Color,
-			Material:         product.Material,
-			Gender:           product.Gender,
-			Price:            product.Price,
-			PromotionalPrice: product.PromotionalPrice,
-			StockQuantity:    product.StockQuantity,
-			MinStock:         product.MinStock,
-			Weight:           product.Weight,
-			Dimensions:       product.Dimensions,
-			Images:           minio.JsonToStringSlice(product.Images),
-			IsActive:         product.IsActive,
-			IsPromotional:    product.IsPromotional,
-			Tags:             product.Tags,
-			SEODescription:   product.SEODescription,
-			SEOKeywords:      product.SEOKeywords,
-		},
+		"product": toProductResponse(product),
 	})
 }
 
 func UpdateProduct(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	// Converter string para uint
-	productID, err := strconv.ParseUint(id, 10, 64)
+	productID, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "ID inválido",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
 
 	req := UpdateProductRequest{}
@@ -128,7 +220,6 @@ func UpdateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Validar dados
 	if err := req.Validate(); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "Dados inválidos",
@@ -136,31 +227,24 @@ func UpdateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Verificar se produto existe
 	var product schemas.Products
 	if err := config.DB.First(&product, productID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Produto não encontrado",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Produto não encontrado"})
 	}
 
-	// Mapear campos atualizáveis
 	updates := make(map[string]interface{})
 
+	if req.SKU != nil {
+		updates["sku"] = strings.TrimSpace(*req.SKU)
+	}
 	if req.Name != nil {
-		updates["name"] = *req.Name
+		updates["name"] = strings.TrimSpace(*req.Name)
 	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
 	if req.Categorys != nil {
 		updates["categorys"] = *req.Categorys
-	}
-	if req.Subcategory != nil {
-		updates["subcategory"] = *req.Subcategory
-	}
-	if req.Brand != nil {
-		updates["brand"] = *req.Brand
 	}
 	if req.Size != nil {
 		updates["size"] = *req.Size
@@ -179,6 +263,11 @@ func UpdateProduct(c *fiber.Ctx) error {
 	}
 	if req.PromotionalPrice != nil {
 		updates["promotional_price"] = req.PromotionalPrice
+		if *req.PromotionalPrice > 0 {
+			updates["is_promotional"] = true
+		} else {
+			updates["is_promotional"] = false
+		}
 	}
 	if req.StockQuantity != nil {
 		updates["stock_quantity"] = *req.StockQuantity
@@ -198,6 +287,9 @@ func UpdateProduct(c *fiber.Ctx) error {
 	if req.IsPromotional != nil {
 		updates["is_promotional"] = *req.IsPromotional
 	}
+	if req.Status != nil {
+		updates["status"] = *req.Status
+	}
 	if req.Tags != nil {
 		updates["tags"] = *req.Tags
 	}
@@ -208,7 +300,12 @@ func UpdateProduct(c *fiber.Ctx) error {
 		updates["seo_keywords"] = *req.SEOKeywords
 	}
 
-	// Atualizar no banco
+	if len(updates) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Nenhum campo para atualizar",
+		})
+	}
+
 	if err := config.DB.Model(&product).Updates(updates).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error":   "Erro ao atualizar produto",
@@ -216,7 +313,6 @@ func UpdateProduct(c *fiber.Ctx) error {
 		})
 	}
 
-	// Buscar produto atualizado
 	if err := config.DB.First(&product, productID).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Erro ao buscar produto atualizado",
@@ -225,179 +321,32 @@ func UpdateProduct(c *fiber.Ctx) error {
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"message": "Produto atualizado com sucesso",
-		"product": ProductResponse{
-			ID:               product.ID,
-			SKU:              product.SKU,
-			Name:             product.Name,
-			Description:      product.Description,
-			Categorys:        product.Categorys,
-			Size:             product.Size,
-			Color:            product.Color,
-			Material:         product.Material,
-			Gender:           product.Gender,
-			Price:            product.Price,
-			PromotionalPrice: product.PromotionalPrice,
-			StockQuantity:    product.StockQuantity,
-			MinStock:         product.MinStock,
-			Weight:           product.Weight,
-			Dimensions:       product.Dimensions,
-			Images:           minio.JsonToStringSlice(product.Images),
-			IsActive:         product.IsActive,
-			IsPromotional:    product.IsPromotional,
-			Tags:             product.Tags,
-			SEODescription:   product.SEODescription,
-			SEOKeywords:      product.SEOKeywords,
-		},
+		"product": toProductResponse(product),
 	})
 }
 
 func DeleteProduct(c *fiber.Ctx) error {
-	id := c.Params("id")
-
-	// Converter string para uint
-	productID, err := strconv.ParseUint(id, 10, 64)
+	productID, err := strconv.ParseUint(c.Params("id"), 10, 64)
 	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "ID inválido",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ID inválido"})
 	}
 
-	// Verificar se produto existe
 	var product schemas.Products
 	if err := config.DB.First(&product, productID).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Produto não encontrado",
-		})
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Produto não encontrado"})
 	}
 
-	// Soft delete (desativar ao invés de deletar)
-	if err := config.DB.Model(&product).Update("is_active", false).Error; err != nil {
+	if err := config.DB.Model(&product).Updates(map[string]interface{}{
+		"is_active": false,
+		"status":    schemas.ProductStatusDraft,
+	}).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Erro ao deletar produto",
+			"error":   "Erro ao excluir produto",
 			"details": err.Error(),
 		})
 	}
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"message": "Produto deletado com sucesso",
-	})
-}
-
-func ListProducts(c *fiber.Ctx) error {
-	// Parâmetros de paginação
-	pageStr := c.Query("page", "1")
-	limitStr := c.Query("limit", "10")
-
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1
-	}
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 || limit > 100 {
-		limit = 10
-	}
-
-	offset := (page - 1) * limit
-
-	// Filtros
-	filters := ProductFilter{}
-	if category := c.Query("category"); category != "" {
-		cat := schemas.Category(category)
-		filters.Category = &cat
-	}
-	if subcategory := c.Query("subcategory"); subcategory != "" {
-		filters.Subcategory = &subcategory
-	}
-	if brand := c.Query("brand"); brand != "" {
-		filters.Brand = &brand
-	}
-	if size := c.Query("size"); size != "" {
-		filters.Size = &size
-	}
-	if color := c.Query("color"); color != "" {
-		filters.Color = &color
-	}
-	if search := c.Query("search"); search != "" {
-		filters.Search = &search
-	}
-
-	// Query base
-	query := config.DB.Model(&schemas.Products{})
-
-	// Aplicar filtros
-	if filters.Category != nil {
-		query = query.Where("categorys = ?", *filters.Category)
-	}
-	if filters.Subcategory != nil {
-		query = query.Where("subcategory LIKE ?", "%"+*filters.Subcategory+"%")
-	}
-	if filters.Brand != nil {
-		query = query.Where("brand LIKE ?", "%"+*filters.Brand+"%")
-	}
-	if filters.Size != nil {
-		query = query.Where("size = ?", *filters.Size)
-	}
-	if filters.Color != nil {
-		query = query.Where("color LIKE ?", "%"+*filters.Color+"%")
-	}
-	if filters.Search != nil {
-		query = query.Where("name LIKE ? OR description LIKE ? OR sku LIKE ?",
-			"%"+*filters.Search+"%", "%"+*filters.Search+"%", "%"+*filters.Search+"%")
-	}
-
-	// Contar total de registros
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Erro ao contar produtos",
-		})
-	}
-
-	// Buscar produtos
-	var products []schemas.Products
-	if err := query.Offset(offset).Limit(limit).Find(&products).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Erro ao buscar produtos",
-		})
-	}
-
-	// Converter para response
-	var productResponses []ProductResponse
-	for _, product := range products {
-		productResponses = append(productResponses, ProductResponse{
-			ID:               product.ID,
-			SKU:              product.SKU,
-			Name:             product.Name,
-			Description:      product.Description,
-			Categorys:        product.Categorys,
-			Size:             product.Size,
-			Color:            product.Color,
-			Material:         product.Material,
-			Gender:           product.Gender,
-			Price:            product.Price,
-			PromotionalPrice: product.PromotionalPrice,
-			StockQuantity:    product.StockQuantity,
-			MinStock:         product.MinStock,
-			Weight:           product.Weight,
-			Dimensions:       product.Dimensions,
-			Images:           minio.JsonToStringSlice(product.Images),
-			IsActive:         product.IsActive,
-			IsPromotional:    product.IsPromotional,
-			Tags:             product.Tags,
-			SEODescription:   product.SEODescription,
-			SEOKeywords:      product.SEOKeywords,
-		})
-	}
-
-	// Calcular total de páginas
-	totalPages := int((total + int64(limit) - 1) / int64(limit))
-
-	return c.Status(fiber.StatusOK).JSON(ProductListResponse{
-		Products: productResponses,
-		Total:    total,
-		Page:     page,
-		Limit:    limit,
-		Pages:    totalPages,
+		"message": "Produto removido com sucesso",
 	})
 }

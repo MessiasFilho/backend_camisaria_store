@@ -27,9 +27,13 @@ func InitializeRoutes(app *fiber.App) {
 	auth.Post("/login", authcontroller.LoginUser)
 	auth.Post("/register", userController.CreateUser)
 
+	// Loja pública — produtos publicados na página principal
+	public.Get("/store/products", controller.ListPublishedProducts)
+
 	// Rotas protegidas - requerem autenticação
 	admin := app.Group("/api/admin", authcontroller.AuthMiddleware, authcontroller.AdminMiddlware)
-	admin.Delete("/:id", userController.DeleteUser) // Apenas admins podem deletar
+	admin.Post("/users", userController.CreateStaffUser) // Criar admin/user interno (Postman)
+	admin.Delete("/:id", userController.DeleteUser)    // Apenas admins podem deletar
 
 	// Grupo geral para /api/* (exceto /api/auth/* que já foi definido acima)
 	protected := app.Group("/api", authcontroller.AuthMiddleware, authcontroller.UserMiddleware)

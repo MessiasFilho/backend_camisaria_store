@@ -14,6 +14,7 @@ type Users struct {
 	ID        uint64    `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name      string    `json:"name" gorm:"type:varchar(255)"`
 	Email     string    `json:"email" gorm:"unique"`
+	Contact   string    `json:"contact" gorm:"type:varchar(32)"` // telefone / WhatsApp (cadastro na loja)
 	Password  string    `json:"password" gorm:"type:varchar(255)"`
 	Role      UserRole  `json:"role" gorm:"type:enum('admin','user','client');default:'client'"`
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
