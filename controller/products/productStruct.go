@@ -88,6 +88,16 @@ type ProductListResponse struct {
 	Pages    int               `json:"pages"`
 }
 
+type CategoryCountItem struct {
+	Category schemas.Category `json:"category"`
+	Count    int64            `json:"count"`
+}
+
+type CategoriesSummaryResponse struct {
+	Categories []CategoryCountItem `json:"categories"`
+	Total      int64               `json:"total"`
+}
+
 type ProductFilter struct {
 	Category *schemas.Category
 	Status   *schemas.ProductStatus
@@ -132,6 +142,20 @@ func isValidStatus(s schemas.ProductStatus) bool {
 	return s == schemas.ProductStatusDraft || s == schemas.ProductStatusPublished
 }
 
+// genderForCategory mantém gênero alinhado à categoria do catálogo.
+func genderForCategory(cat schemas.Category) string {
+	switch cat {
+	case schemas.Masculino:
+		return "M"
+	case schemas.Feminino:
+		return "F"
+	case schemas.Fardamentos:
+		return "U"
+	default:
+		return "U"
+	}
+}
+
 func (req *CreateProductRequest) Validate() error {
 	var errs []string
 
@@ -159,9 +183,7 @@ func (req *CreateProductRequest) Validate() error {
 		errs = append(errs, "cor é obrigatória")
 	}
 
-	if req.Gender != "" && req.Gender != "M" && req.Gender != "F" && req.Gender != "U" {
-		errs = append(errs, "gênero deve ser M, F ou U")
-	}
+	req.Gender = genderForCategory(req.Categorys)
 
 	if req.Price <= 0 {
 		errs = append(errs, "preço deve ser maior que zero")
@@ -216,8 +238,9 @@ func (req *UpdateProductRequest) Validate() error {
 		errs = append(errs, "categoria deve ser masculino, feminino ou fardamentos")
 	}
 
-	if req.Gender != nil && *req.Gender != "" && *req.Gender != "M" && *req.Gender != "F" && *req.Gender != "U" {
-		errs = append(errs, "gênero deve ser M, F ou U")
+	if req.Categorys != nil {
+		g := genderForCategory(*req.Categorys)
+		req.Gender = &g
 	}
 
 	if req.Price != nil && *req.Price <= 0 {

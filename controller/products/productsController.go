@@ -28,7 +28,7 @@ func parsePagination(c *fiber.Ctx) (page, limit, offset int) {
 
 func applyProductFilters(query *gorm.DB, filters ProductFilter) *gorm.DB {
 	if filters.Category != nil {
-		query = query.Where("categorys = ?", *filters.Category)
+		query = query.Where("LOWER(categorys) = ?", strings.ToLower(string(*filters.Category)))
 	}
 	if filters.Status != nil {
 		query = query.Where("status = ?", *filters.Status)
@@ -80,6 +80,81 @@ func listProductsWithFilters(c *fiber.Ctx, filters ProductFilter) error {
 		Limit:    limit,
 		Pages:    totalPages,
 	})
+}
+
+// ListCategoriesSummary — totais por categoria para o aside do admin.
+func ListCategoriesSummary(c *fiber.Ctx) error {
+	type row struct {
+		Category string `gorm:"column:category"`
+		Count    int64  `gorm:"column:count"`
+	}
+	var rows []row
+
+	err := config.DB.Raw(`
+		SELECT categorys AS category, COUNT(*) AS count
+		FROM products
+		WHERE is_active = ?
+		GROUP BY categorys
+	`, true).Scan(&rows).Error
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error":   "Erro ao buscar resumo de categorias",
+			"details": err.Error(),
+		})
+	}
+
+	counts := map[schemas.Category]int64{
+		schemas.Masculino:   0,
+		schemas.Feminino:    0,
+		schemas.Fardamentos: 0,
+	}
+	var total int64
+	for _, r := range rows {
+		cat := schemas.Category(strings.ToLower(strings.TrimSpace(r.Category)))
+		if isValidCategory(cat) {
+			counts[cat] += r.Count
+			total += r.Count
+		}
+	}
+
+	categories := []CategoryCountItem{
+		{Category: schemas.Masculino, Count: counts[schemas.Masculino]},
+		{Category: schemas.Feminino, Count: counts[schemas.Feminino]},
+		{Category: schemas.Fardamentos, Count: counts[schemas.Fardamentos]},
+	}
+
+	return c.Status(fiber.StatusOK).JSON(CategoriesSummaryResponse{
+		Categories: categories,
+		Total:      total,
+	})
+}
+
+// ListProductsByCategory — lista paginada filtrada pela categoria (path).
+func ListProductsByCategory(c *fiber.Ctx) error {
+	categoryParam := c.Params("category")
+	cat := schemas.Category(categoryParam)
+	if !isValidCategory(cat) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Categoria inválida. Use: masculino, feminino ou fardamentos",
+		})
+	}
+
+	filters := ProductFilter{Category: &cat}
+
+	if status := c.Query("status"); status != "" {
+		st := schemas.ProductStatus(status)
+		filters.Status = &st
+	}
+	if search := c.Query("search"); search != "" {
+		filters.Search = &search
+	}
+	active := true
+	if activeStr := c.Query("active"); activeStr != "" {
+		active = activeStr == "true" || activeStr == "1"
+	}
+	filters.Active = &active
+
+	return listProductsWithFilters(c, filters)
 }
 
 // ListProducts — admin: lista paginada com filtros (category, status, search, active).

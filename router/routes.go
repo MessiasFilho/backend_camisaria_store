@@ -5,6 +5,7 @@ import (
 	clientController "backend_camisaria_store/controller/clients"
 	controller "backend_camisaria_store/controller/products"
 	userController "backend_camisaria_store/controller/user"
+	instanceController "backend_camisaria_store/controller/whatsapp/instance"
 	"backend_camisaria_store/service/minio"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,16 +17,15 @@ func InitializeRoutes(app *fiber.App) {
 
 	// Rotas públicas - não precisam de autenticação
 
-	public := app.Group("/api")
+	public := app.Group("/public")
 	public.Get("/", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
 			"message": "API is running",
 		})
 	})
 
-	auth := app.Group("/api/auth")
-	auth.Post("/login", authcontroller.LoginUser)
-	auth.Post("/register", userController.CreateUser)
+	public.Post("/login", authcontroller.LoginUser)
+	public.Post("/register", userController.CreateUser)
 
 	// Loja pública — produtos publicados na página principal
 	public.Get("/store/products", controller.ListPublishedProducts)
@@ -33,7 +33,7 @@ func InitializeRoutes(app *fiber.App) {
 	// Rotas protegidas - requerem autenticação
 	admin := app.Group("/api/admin", authcontroller.AuthMiddleware, authcontroller.AdminMiddlware)
 	admin.Post("/users", userController.CreateStaffUser) // Criar admin/user interno (Postman)
-	admin.Delete("/:id", userController.DeleteUser)    // Apenas admins podem deletar
+	admin.Delete("/:id", userController.DeleteUser)      // Apenas admins podem deletar
 
 	// Grupo geral para /api/* (exceto /api/auth/* que já foi definido acima)
 	protected := app.Group("/api", authcontroller.AuthMiddleware, authcontroller.UserMiddleware)
@@ -44,11 +44,13 @@ func InitializeRoutes(app *fiber.App) {
 	usersProtected.Get("/:id", userController.GetUser)    // Apenas usuários autenticados
 	usersProtected.Put("/:id", userController.UpdateUser) // Apenas usuários autenticados
 
-	// Rotas de produtos
+	// Rotas de produtos (rotas fixas antes de /:id)
 	products := protected.Group("/products")
-	products.Post("/", controller.CreateProduct)      // Criar produto
-	products.Get("/", controller.ListProducts)        // Listar produtos
-	products.Get("/:id", controller.GetProduct)       // Buscar produto por ID
+	products.Get("/categories", controller.ListCategoriesSummary)
+	products.Get("/category/:category", controller.ListProductsByCategory)
+	products.Post("/", controller.CreateProduct)
+	products.Get("/", controller.ListProducts)
+	products.Get("/:id", controller.GetProduct)
 	products.Put("/:id", controller.UpdateProduct)    // Atualizar produto
 	products.Delete("/:id", controller.DeleteProduct) // Deletar produto
 
@@ -64,5 +66,9 @@ func InitializeRoutes(app *fiber.App) {
 	clients.Get("/:id", clientController.GetClient)       // Buscar cliente por ID
 	clients.Put("/:id", clientController.UpdateClient)    // Atualizar cliente
 	clients.Delete("/:id", clientController.DeleteClient) // Deletar cliente (soft delete)
+
+	// Rotas de instâncias
+	instances := admin.Group("/instances")
+	instances.Post("/", instanceController.CreateInstance)
 
 }

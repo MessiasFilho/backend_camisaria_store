@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func InitializeMysql() (*gorm.DB, error) {
@@ -41,7 +43,17 @@ func InitializeMysql() (*gorm.DB, error) {
 		name,
 	)
 
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             time.Second,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{Logger: gormLogger})
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +67,7 @@ func InitializeMysql() (*gorm.DB, error) {
 		&schemas.Products{},
 		&schemas.OrderItems{},
 		&schemas.Address{},
+		&schemas.Instance{},
 	); err != nil {
 		return nil, err
 	}
